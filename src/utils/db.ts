@@ -329,11 +329,17 @@ export async function exportAllData(): Promise<Record<string, unknown[]>> {
 
 export async function importAllData(data: Record<string, unknown[]>): Promise<void> {
   const db = await initDB();
-  const tx = db.transaction(
-    ["journals", "observations", "user_species_records", "equipment"],
-    "readwrite"
-  );
-  for (const store of ["journals", "observations", "user_species_records", "equipment"]) {
+  const userStores = [
+    "journals",
+    "observations",
+    "user_species_records",
+    "equipment",
+  ] as const;
+  const tx = db.transaction(userStores, "readwrite");
+  for (const store of userStores) {
+    await tx.objectStore(store).clear();
+  }
+  for (const store of userStores) {
     if (data[store]) {
       for (const item of data[store]) {
         await tx.objectStore(store as any).put(item as any);

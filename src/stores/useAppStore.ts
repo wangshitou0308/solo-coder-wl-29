@@ -99,6 +99,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   refreshAll: async () => {
     set({ loading: true });
+    await refreshUserSpeciesRecords();
     const [journals, observations, userSpeciesRecords, equipment, allSpecies] = await Promise.all([
       getAllJournals(),
       getAllObservations(),

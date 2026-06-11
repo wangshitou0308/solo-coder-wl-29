@@ -58,15 +58,18 @@ export default function ExportPage() {
     setImporting(true);
     setSuccess("");
     try {
-      await triggerImport();
-      await refreshAll();
-      setSuccess("数据导入成功");
-      setTimeout(() => setSuccess(""), 3000);
+      const result = await triggerImport();
+      if (result) {
+        await refreshAll();
+        setSuccess("数据导入成功");
+        setTimeout(() => setSuccess(""), 3000);
+      }
     } catch (error) {
       console.error("导入失败:", error);
       alert("导入失败，请检查文件格式");
+    } finally {
+      setImporting(false);
     }
-    setImporting(false);
   };
 
   const years = [];

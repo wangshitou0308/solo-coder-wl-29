@@ -33,24 +33,39 @@ export async function restoreBackup(file: File): Promise<void> {
   await importAllData(parsed.data);
 }
 
-export async function triggerImport(): Promise<void> {
-  return new Promise((resolve, reject) => {
+export async function triggerImport(): Promise<boolean> {
+  return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "application/json";
+    let resolved = false;
+    const finish = (result: boolean) => {
+      if (!resolved) {
+        resolved = true;
+        resolve(result);
+      }
+    };
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) {
-        reject(new Error("No file selected"));
+        finish(false);
         return;
       }
       try {
         await restoreBackup(file);
-        resolve();
+        finish(true);
       } catch (e) {
-        reject(e);
+        console.error("Restore error:", e);
+        finish(false);
+        throw e;
       }
     };
+    input.oncancel = () => {
+      finish(false);
+    };
+    setTimeout(() => {
+      finish(false);
+    }, 60000);
     input.click();
   });
 }
