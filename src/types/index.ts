@@ -90,6 +90,36 @@ export interface Equipment {
   created_at: string;
 }
 
+export interface WishlistItem {
+  species_id: string;
+  added_at: string;
+  completed_at?: string;
+}
+
+export type ObservedFilterType = "all" | "observed" | "unobserved" | "wishlist" | "common";
+
+export type ImageExportStrategy = "original" | "compressed" | "reference_only";
+
+export const ImageExportStrategyLabels: Record<ImageExportStrategy, string> = {
+  original: "原图",
+  compressed: "压缩图片",
+  reference_only: "仅引用路径",
+};
+
+export interface ImportSummary {
+  journalCount: number;
+  observationCount: number;
+  speciesRecordCount: number;
+  equipmentCount: number;
+  wishlistCount: number;
+}
+
+export interface BackupReminderState {
+  lastReminderAt: string | null;
+  recordsSinceLastBackup: number;
+  lastBackupAt: string | null;
+}
+
 export type EquipmentType = "binoculars" | "camera" | "lens" | "tripod" | "other";
 
 export const HabitatTypeLabels: Record<HabitatType, string> = {

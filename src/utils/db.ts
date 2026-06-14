@@ -8,6 +8,8 @@ import type {
   BirdObservation,
   UserSpeciesRecord,
   Equipment,
+  WishlistItem,
+  ImportSummary,
 } from "@/types";
 import { seedBirdData, isSeeded, setSeeded } from "./seed";
 
@@ -49,10 +51,14 @@ interface BirdingDB extends DBSchema {
     key: string;
     value: Equipment;
   };
+  wishlist: {
+    key: string;
+    value: WishlistItem;
+  };
 }
 
 const DB_NAME = "birding-journal-db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbInstance: IDBPDatabase<BirdingDB> | null = null;
 
@@ -60,7 +66,7 @@ export async function initDB(): Promise<IDBPDatabase<BirdingDB>> {
   if (dbInstance) return dbInstance;
 
   dbInstance = await openDB<BirdingDB>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
+    upgrade(db, oldVersion) {
       if (!db.objectStoreNames.contains("bird_orders")) {
         db.createObjectStore("bird_orders", { keyPath: "id" });
       }
@@ -93,6 +99,11 @@ export async function initDB(): Promise<IDBPDatabase<BirdingDB>> {
       }
       if (!db.objectStoreNames.contains("equipment")) {
         db.createObjectStore("equipment", { keyPath: "id" });
+      }
+      if (oldVersion < 2) {
+        if (!db.objectStoreNames.contains("wishlist")) {
+          db.createObjectStore("wishlist", { keyPath: "species_id" });
+        }
       }
     },
   });
@@ -136,6 +147,16 @@ export async function getSpeciesByGenus(genusId: string): Promise<BirdSpecies[]>
 export async function getAllSpecies(): Promise<BirdSpecies[]> {
   const db = await initDB();
   return db.getAll("bird_species");
+}
+
+export async function getAllFamilies(): Promise<BirdFamily[]> {
+  const db = await initDB();
+  return db.getAll("bird_families");
+}
+
+export async function getAllGenera(): Promise<BirdGenus[]> {
+  const db = await initDB();
+  return db.getAll("bird_genera");
 }
 
 export async function getSpeciesById(id: string): Promise<BirdSpecies | undefined> {
@@ -308,6 +329,31 @@ export async function deleteEquipment(id: string): Promise<void> {
   await db.delete("equipment", id);
 }
 
+export async function getWishlist(): Promise<WishlistItem[]> {
+  const db = await initDB();
+  return db.getAll("wishlist");
+}
+
+export async function saveWishlistItem(item: WishlistItem): Promise<string> {
+  const db = await initDB();
+  return db.put("wishlist", item);
+}
+
+export async function deleteWishlistItem(speciesId: string): Promise<void> {
+  const db = await initDB();
+  await db.delete("wishlist", speciesId);
+}
+
+export async function saveAllWishlist(items: WishlistItem[]): Promise<void> {
+  const db = await initDB();
+  const tx = db.transaction("wishlist", "readwrite");
+  await tx.store.clear();
+  for (const item of items) {
+    await tx.store.put(item);
+  }
+  await tx.done;
+}
+
 export async function exportAllData(): Promise<Record<string, unknown[]>> {
   const db = await initDB();
   const stores = [
@@ -319,6 +365,7 @@ export async function exportAllData(): Promise<Record<string, unknown[]>> {
     "observations",
     "user_species_records",
     "equipment",
+    "wishlist",
   ] as const;
   const result: Record<string, unknown[]> = {};
   for (const store of stores) {
@@ -327,15 +374,25 @@ export async function exportAllData(): Promise<Record<string, unknown[]>> {
   return result;
 }
 
-export async function importAllData(data: Record<string, unknown[]>): Promise<void> {
+export async function importAllData(data: Record<string, unknown[]>): Promise<ImportSummary> {
   const db = await initDB();
   const userStores = [
     "journals",
     "observations",
     "user_species_records",
     "equipment",
+    "wishlist",
   ] as const;
   const tx = db.transaction(userStores, "readwrite");
+
+  const summary: ImportSummary = {
+    journalCount: 0,
+    observationCount: 0,
+    equipmentCount: 0,
+    wishlistCount: 0,
+    speciesRecordCount: 0,
+  };
+
   for (const store of userStores) {
     await tx.objectStore(store).clear();
   }
@@ -344,7 +401,13 @@ export async function importAllData(data: Record<string, unknown[]>): Promise<vo
       for (const item of data[store]) {
         await tx.objectStore(store as any).put(item as any);
       }
+      if (store === "journals") summary.journalCount = data[store].length;
+      if (store === "observations") summary.observationCount = data[store].length;
+      if (store === "equipment") summary.equipmentCount = data[store].length;
+      if (store === "wishlist") summary.wishlistCount = data[store].length;
+      if (store === "user_species_records") summary.speciesRecordCount = data[store].length;
     }
   }
   await tx.done;
+  return summary;
 }

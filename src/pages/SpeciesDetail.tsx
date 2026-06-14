@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/stores/useAppStore";
 import {
   ArrowLeft,
@@ -12,6 +12,10 @@ import {
   ChevronRight,
   Plus,
   BookOpen,
+  Users,
+  TrendingUp,
+  Award,
+  X,
 } from "lucide-react";
 import { LoadingSpinner, EmptyState } from "@/components/Common";
 import {
@@ -19,80 +23,112 @@ import {
   ResidenceTypeLabels,
   ConservationStatusLabels,
 } from "@/types";
-import type { BirdSpecies, UserSpeciesRecord, BirdObservation } from "@/types";
-import { getObservationsBySpecies, getSpeciesById, getGenusById, getFamilyById, getOrderById } from "@/utils/db";
+import type { BirdSpecies } from "@/types";
 import { formatDate } from "@/utils/date";
+import { getSpeciesDetailStats, buildTaxonomyMaps, type SpeciesDetailStats } from "@/utils/stats";
 
 export default function SpeciesDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { init, userSpeciesRecords, allSpecies } = useAppStore();
+  const {
+    init,
+    allSpecies,
+    allFamilies,
+    allGenera,
+    orders,
+    userSpeciesRecords,
+    observations,
+    journals,
+    addToWishlist,
+    removeFromWishlist,
+    isInWishlist,
+    getWishlistItem,
+  } = useAppStore();
 
-  const [species, setSpecies] = useState<BirdSpecies | null>(null);
-  const [userRecord, setUserRecord] = useState<UserSpeciesRecord | null>(null);
-  const [observations, setObservations] = useState<BirdObservation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [genusName, setGenusName] = useState("");
-  const [familyName, setFamilyName] = useState("");
-  const [orderName, setOrderName] = useState("");
-  const [isWishlisted, setIsWishlisted] = useState(false);
 
   useEffect(() => {
-    init();
+    const doInit = async () => {
+      await init();
+      setLoading(false);
+    };
+    doInit();
   }, [init]);
 
-  useEffect(() => {
-    if (id) {
-      loadData();
-      checkWishlist();
+  const species = useMemo<BirdSpecies | null>(() => {
+    if (!id) return null;
+    return allSpecies.find((s) => s.id === id) || null;
+  }, [allSpecies, id]);
+
+  const taxonomyInfo = useMemo(() => {
+    if (!species) return { orderName: "", familyName: "", genusName: "" };
+    const { speciesToGenus, speciesToFamily, speciesToOrder, genusMap, familyMap } =
+      buildTaxonomyMaps(allSpecies, allFamilies, allGenera);
+
+    const genus = speciesToGenus.get(species.id);
+    const family = speciesToFamily.get(species.id);
+    const order = speciesToOrder.get(species.id);
+
+    const orderName = order ? order.name_cn : orders.find((o) => {
+      const f = family || (genus ? familyMap.get(genus.family_id) : null);
+      return f ? o.id === f.order_id : false;
+    })?.name_cn || "";
+
+    return {
+      orderName,
+      familyName: family?.name_cn || "",
+      genusName: genus?.name_cn || "",
+    };
+  }, [species, allSpecies, allFamilies, allGenera, orders]);
+
+  const userRecord = useMemo(() => {
+    if (!id) return null;
+    return userSpeciesRecords.find((r) => r.species_id === id) || null;
+  }, [userSpeciesRecords, id]);
+
+  const stats: SpeciesDetailStats = useMemo(() => {
+    if (!id) {
+      return {
+        firstObservedAt: null,
+        firstLocation: null,
+        lastObservedAt: null,
+        lastLocation: null,
+        totalObservations: 0,
+        totalIndividuals: 0,
+        locations: [],
+      };
     }
-  }, [id]);
+    return getSpeciesDetailStats(id, observations, journals, userSpeciesRecords);
+  }, [id, observations, journals, userSpeciesRecords]);
 
-  const loadData = async () => {
-    if (!id) return;
-    setLoading(true);
+  const speciesObservations = useMemo(() => {
+    if (!id) return [];
+    const journalMap = new Map(journals.map((j) => [j.id, j]));
+    return observations
+      .filter((o) => o.species_id === id)
+      .map((o) => ({
+        observation: o,
+        journal: journalMap.get(o.journal_id),
+      }))
+      .filter((x) => x.journal)
+      .sort(
+        (a, b) =>
+          new Date(b.journal!.start_time).getTime() -
+          new Date(a.journal!.start_time).getTime()
+      );
+  }, [id, observations, journals]);
 
-    const sp = await getSpeciesById(id);
-    setSpecies(sp || null);
-
-    if (sp) {
-      const genus = await getGenusById(sp.genus_id);
-      setGenusName(genus?.name_cn || "");
-      if (genus) {
-        const family = await getFamilyById(genus.family_id);
-        setFamilyName(family?.name_cn || "");
-        if (family) {
-          const order = await getOrderById(family.order_id);
-          setOrderName(order?.name_cn || "");
-        }
-      }
-    }
-
-    const record = userSpeciesRecords.find((r) => r.species_id === id);
-    setUserRecord(record || null);
-
-    const obs = await getObservationsBySpecies(id);
-    setObservations(obs);
-
-    setLoading(false);
-  };
-
-  const checkWishlist = () => {
-    const wishlist = JSON.parse(localStorage.getItem("birding_wishlist") || "[]");
-    setIsWishlisted(wishlist.includes(id));
-  };
+  const wishlisted = id ? isInWishlist(id) : false;
+  const wishlistItem = id ? getWishlistItem(id) : undefined;
+  const wishlistCompleted = wishlistItem?.completed_at;
 
   const toggleWishlist = () => {
     if (!id) return;
-    const wishlist: string[] = JSON.parse(localStorage.getItem("birding_wishlist") || "[]");
-    if (isWishlisted) {
-      const newList = wishlist.filter((sid) => sid !== id);
-      localStorage.setItem("birding_wishlist", JSON.stringify(newList));
+    if (wishlisted) {
+      removeFromWishlist(id);
     } else {
-      wishlist.push(id);
-      localStorage.setItem("birding_wishlist", JSON.stringify(wishlist));
+      addToWishlist(id);
     }
-    setIsWishlisted(!isWishlisted);
   };
 
   if (loading) {
@@ -123,15 +159,18 @@ export default function SpeciesDetail() {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-earth-500">
-            {orderName} / {familyName} / {genusName}
+          <p className="text-sm text-earth-500 truncate">
+            {taxonomyInfo.orderName} / {taxonomyInfo.familyName} / {taxonomyInfo.genusName}
           </p>
         </div>
         <button
           onClick={toggleWishlist}
-          className={`btn-ghost !p-2 !min-h-0 ${isWishlisted ? "text-amber-500" : "text-earth-400"}`}
+          className={`btn-ghost !p-2 !min-h-0 ${
+            wishlisted ? "text-amber-500" : "text-earth-400"
+          }`}
+          title={wishlisted ? "移出愿望清单" : "加入愿望清单"}
         >
-          <Star className={`w-5 h-5 ${isWishlisted ? "fill-amber-500" : ""}`} />
+          <Star className={`w-5 h-5 ${wishlisted ? "fill-amber-500" : ""}`} />
         </button>
       </div>
 
@@ -139,7 +178,9 @@ export default function SpeciesDetail() {
         <div className="flex items-start gap-4">
           <div
             className={`w-20 h-20 rounded-2xl flex items-center justify-center flex-shrink-0 ${
-              isObserved ? "bg-gradient-to-br from-olive-400 to-olive-600" : "bg-cream-200"
+              isObserved
+                ? "bg-gradient-to-br from-olive-400 to-olive-600"
+                : "bg-cream-200"
             }`}
           >
             {isObserved ? (
@@ -153,16 +194,30 @@ export default function SpeciesDetail() {
               <h1 className="font-serif text-2xl font-bold text-earth-800">
                 {species.name_cn}
               </h1>
-              {species.is_common && (
-                <span className="chip-olive">常见</span>
-              )}
-              {isObserved && (
-                <span className="chip-olive">已观察</span>
+              {species.is_common && <span className="chip-olive">常见</span>}
+              {isObserved && <span className="chip-olive">已观察</span>}
+              {wishlisted && (
+                <span
+                  className={`chip ${
+                    wishlistCompleted
+                      ? "bg-green-100 text-green-700 border-green-200"
+                      : "bg-amber-50 text-amber-700 border-amber-200"
+                  }`}
+                >
+                  <Star className="w-3 h-3 mr-1 inline" />
+                  {wishlistCompleted ? "愿望已达成" : "愿望清单"}
+                </span>
               )}
             </div>
             <p className="text-earth-500 italic mt-1">{species.name_latin}</p>
             {species.common_name && (
               <p className="text-sm text-earth-400 mt-1">又名：{species.common_name}</p>
+            )}
+            {wishlisted && wishlistCompleted && (
+              <p className="text-xs text-green-600 mt-2 flex items-center gap-1">
+                <Award className="w-3 h-3" />
+                完成时间：{formatDate(wishlistCompleted)}
+              </p>
             )}
           </div>
         </div>
@@ -206,61 +261,180 @@ export default function SpeciesDetail() {
         </div>
       </div>
 
-      {isObserved && userRecord ? (
-        <div className="card p-5 mb-6">
-          <h2 className="section-title mb-4">
-            <Star className="w-5 h-5 text-amber-500" />
-            我的观察记录
-          </h2>
+      {isObserved ? (
+        <>
+          <div className="card p-5 mb-6">
+            <h2 className="section-title mb-4">
+              <TrendingUp className="w-5 h-5 text-olive-600" />
+              观察统计
+            </h2>
 
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div className="p-3 bg-olive-50 rounded-xl">
-              <p className="text-xs text-earth-500 mb-1">首次观察</p>
-              <p className="font-medium text-earth-800 text-sm">
-                {formatDate(userRecord.first_observed_at)}
-              </p>
-              <p className="text-xs text-earth-500 flex items-center gap-1 mt-1">
-                <MapPin className="w-3 h-3" />
-                {userRecord.first_location}
-              </p>
+            <div className="grid grid-cols-2 gap-4 mb-5">
+              <div className="p-3 bg-olive-50 rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <Calendar className="w-4 h-4 text-olive-600" />
+                  <p className="text-xs text-earth-500">首次观察</p>
+                </div>
+                <p className="font-medium text-earth-800 text-sm">
+                  {stats.firstObservedAt ? formatDate(stats.firstObservedAt) : "-"}
+                </p>
+                <p className="text-xs text-earth-500 flex items-center gap-1 mt-1">
+                  <MapPin className="w-3 h-3" />
+                  {stats.firstLocation || "未记录地点"}
+                </p>
+              </div>
+              <div className="p-3 bg-amber-50 rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock className="w-4 h-4 text-amber-600" />
+                  <p className="text-xs text-earth-500">最近观察</p>
+                </div>
+                <p className="font-medium text-earth-800 text-sm">
+                  {stats.lastObservedAt ? formatDate(stats.lastObservedAt) : "-"}
+                </p>
+                <p className="text-xs text-earth-500 flex items-center gap-1 mt-1">
+                  <MapPin className="w-3 h-3" />
+                  {stats.lastLocation || "未记录地点"}
+                </p>
+              </div>
+              <div className="p-3 bg-sky-50 rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <BookOpen className="w-4 h-4 text-sky-600" />
+                  <p className="text-xs text-earth-500">总观察次数</p>
+                </div>
+                <p className="font-semibold text-2xl text-earth-800">
+                  {stats.totalObservations}
+                </p>
+                <p className="text-xs text-earth-500">次记录</p>
+              </div>
+              <div className="p-3 bg-purple-50 rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <Users className="w-4 h-4 text-purple-600" />
+                  <p className="text-xs text-earth-500">总观察个体数</p>
+                </div>
+                <p className="font-semibold text-2xl text-earth-800">
+                  {stats.totalIndividuals}
+                </p>
+                <p className="text-xs text-earth-500">只</p>
+              </div>
             </div>
-            <div className="p-3 bg-amber-50 rounded-xl">
-              <p className="text-xs text-earth-500 mb-1">观察次数</p>
-              <p className="font-semibold text-2xl text-earth-800">
-                {userRecord.total_observations}
-              </p>
-              <p className="text-xs text-earth-500">次</p>
-            </div>
+
+            {stats.locations.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-earth-700 mb-3 flex items-center gap-2">
+                  <MapPin className="w-4 h-4" />
+                  出现地点
+                </h3>
+                <div className="space-y-2">
+                  {stats.locations.map((loc) => (
+                    <div
+                      key={loc.location}
+                      className="flex items-center justify-between p-3 bg-cream-50 rounded-xl"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-earth-800 text-sm truncate">
+                          {loc.location}
+                        </p>
+                        <p className="text-xs text-earth-500 mt-1 flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1">
+                            <BookOpen className="w-3 h-3" />
+                            {loc.count} 次
+                          </span>
+                          <span>·</span>
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {formatDate(loc.lastSeen)}
+                          </span>
+                        </p>
+                      </div>
+                      <div className="ml-3 flex-shrink-0">
+                        <div className="text-xs text-earth-400 mb-1">频次</div>
+                        <div className="flex gap-0.5">
+                          {Array.from({
+                            length: Math.min(5, Math.ceil((loc.count / Math.max(...stats.locations.map((l) => l.count))) * 5)),
+                          }).map((_, i) => (
+                            <div
+                              key={i}
+                              className="w-2 h-4 rounded-sm bg-olive-400"
+                            />
+                          ))}
+                          {Array.from({
+                            length: Math.max(
+                              0,
+                              5 -
+                                Math.min(
+                                  5,
+                                  Math.ceil((loc.count / Math.max(...stats.locations.map((l) => l.count))) * 5)
+                                )
+                            ),
+                          }).map((_, i) => (
+                            <div
+                              key={`empty-${i}`}
+                              className="w-2 h-4 rounded-sm bg-cream-200"
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
-          {observations.length > 0 && (
-            <div>
-              <h3 className="text-sm font-medium text-earth-700 mb-3">观察历史</h3>
+          {speciesObservations.length > 0 && (
+            <div className="card p-5 mb-6">
+              <h2 className="section-title mb-4">
+                <BookOpen className="w-5 h-5 text-sky-600" />
+                观察历史
+              </h2>
               <div className="space-y-2">
-                {observations.slice(0, 10).map((obs) => (
+                {speciesObservations.slice(0, 20).map(({ observation, journal }) => (
                   <Link
-                    key={obs.id}
-                    to={`/journal/${obs.journal_id}`}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-cream-50 transition-colors"
+                    key={observation.id}
+                    to={`/journal/${journal!.id}`}
+                    className="flex items-center gap-3 p-3 rounded-xl hover:bg-cream-50 transition-colors border border-transparent hover:border-cream-200"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-cream-100 flex items-center justify-center">
-                      <BookOpen className="w-4 h-4 text-earth-500" />
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-100 to-sky-200 flex items-center justify-center flex-shrink-0">
+                      <BookOpen className="w-5 h-5 text-sky-600" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-earth-700 truncate">
-                        {formatDate(obs.created_at)}
-                      </p>
-                      <p className="text-xs text-earth-400">
-                        {obs.count} 只 · {obs.behavior || "未记录行为"}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-earth-800 text-sm">
+                          {formatDate(journal!.start_time)}
+                        </p>
+                        {observation.count > 1 && (
+                          <span className="chip-olive !py-0 !px-2 text-xs">
+                            {observation.count} 只
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-1 text-xs text-earth-500">
+                        <span className="inline-flex items-center gap-1 truncate">
+                          <MapPin className="w-3 h-3 flex-shrink-0" />
+                          <span className="truncate">
+                            {journal!.location || "未命名地点"}
+                          </span>
+                        </span>
+                        {observation.behavior && (
+                          <>
+                            <span>·</span>
+                            <span>{observation.behavior}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-earth-300" />
+                    <ChevronRight className="w-4 h-4 text-earth-300 flex-shrink-0" />
                   </Link>
                 ))}
               </div>
+              {speciesObservations.length > 20 && (
+                <p className="text-center text-xs text-earth-400 mt-3">
+                  共 {speciesObservations.length} 条记录，显示最近 20 条
+                </p>
+              )}
             </div>
           )}
-        </div>
+        </>
       ) : (
         <div className="card p-6 mb-6 text-center">
           <div className="w-16 h-16 rounded-full bg-cream-100 flex items-center justify-center mx-auto mb-3">
@@ -279,9 +453,25 @@ export default function SpeciesDetail() {
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-cream-100/95 backdrop-blur-md border-t border-cream-200 md:hidden">
         <div className="container flex gap-3">
-          <button onClick={toggleWishlist} className="btn-secondary flex-1">
-            <Star className={`w-4 h-4 ${isWishlisted ? "fill-amber-500 text-amber-500" : ""}`} />
-            {isWishlisted ? "已收藏" : "加入愿望清单"}
+          <button
+            onClick={toggleWishlist}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all ${
+              wishlisted
+                ? "bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200"
+                : "btn-secondary"
+            }`}
+          >
+            {wishlisted ? (
+              <>
+                <X className="w-4 h-4" />
+                移出愿望清单
+              </>
+            ) : (
+              <>
+                <Star className="w-4 h-4" />
+                加入愿望清单
+              </>
+            )}
           </button>
           <Link to="/journal/new" className="btn-primary flex-1">
             <Plus className="w-4 h-4" />
