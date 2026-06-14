@@ -355,12 +355,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
     const wishlist = [...get().wishlist, newItem];
     saveWishlistToStorage(wishlist);
+    saveWishlistItem(newItem);
     set({ wishlist });
   },
 
   removeFromWishlist: (speciesId: string) => {
     const wishlist = get().wishlist.filter((w) => w.species_id !== speciesId);
     saveWishlistToStorage(wishlist);
+    deleteWishlistItem(speciesId);
     set({ wishlist });
   },
 

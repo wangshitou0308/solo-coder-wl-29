@@ -330,7 +330,8 @@ function WishlistCard({
           e.stopPropagation();
           onRemove();
         }}
-        className="p-2 text-earth-300 hover:text-red-500 rounded-lg hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="p-2 text-earth-300 hover:text-red-500 rounded-lg hover:bg-red-50 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+        title="移出愿望清单"
       >
         <Trash2 className="w-4 h-4" />
       </button>

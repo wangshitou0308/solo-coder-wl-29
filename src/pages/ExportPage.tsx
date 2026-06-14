@@ -72,6 +72,12 @@ export default function ExportPage() {
     setExportingPdf(true);
     setSuccess("");
     try {
+      const allJournals = await getAllJournals();
+      if (allJournals.length === 0) {
+        alert("还没有观鸟日记数据，无法生成年度报告。\n请先记录观鸟日记后再来生成报告。");
+        setExportingPdf(false);
+        return;
+      }
       await generateAnnualReport(year);
       setSuccess("PDF报告已生成并下载");
       markBackupDone();
@@ -94,6 +100,10 @@ export default function ExportPage() {
         getAllFamilies(),
         getAllGenera(),
       ]);
+      if (allJournals.length === 0) {
+        alert("还没有观鸟日记数据，无法预览年度报告。\n请先记录观鸟日记后再来预览报告。");
+        return;
+      }
       const previewData = getPdfReportData(
         year,
         allSpecies,
@@ -326,7 +336,7 @@ export default function ExportPage() {
                 </button>
                 <button
                   onClick={handleExportPdf}
-                  disabled={exportingPdf || journals.length === 0}
+                  disabled={exportingPdf}
                   className="btn-primary flex-1"
                 >
                   <Download className="w-4 h-4" />
@@ -412,7 +422,7 @@ export default function ExportPage() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   onClick={handleExportJson}
-                  disabled={exportingJson || journals.length === 0}
+                  disabled={exportingJson}
                   className="btn-secondary flex-1"
                 >
                   <Download className="w-4 h-4" />
@@ -446,7 +456,7 @@ export default function ExportPage() {
 
               <button
                 onClick={handleExportCsv}
-                disabled={exportingCsv || journals.length === 0}
+                disabled={exportingCsv}
                 className="btn-primary w-full sm:w-auto"
               >
                 <Download className="w-4 h-4" />
